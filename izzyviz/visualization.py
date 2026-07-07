@@ -640,7 +640,10 @@ def visualize_attention_matrix(
 
 def _attention_to_numpy(attention):
     if torch.is_tensor(attention):
-        return attention.detach().cpu().numpy()
+        tensor = attention.detach()
+        if tensor.dtype in {torch.bfloat16, torch.float16}:
+            tensor = tensor.float()
+        return tensor.cpu().numpy()
     return np.asarray(attention)
 
 
@@ -5147,6 +5150,251 @@ def select_attention_heads_by_metric(
         "top_records": top_records,
         "display_array": display_array,
         "score_array": score_array,
+        "figures": figures,
+        "axes": axes_map,
+        "output_paths": output_paths,
+    }
+
+
+def _minmax_normalize_array(values, eps=1e-12):
+    values = np.asarray(values, dtype=float)
+    finite = np.isfinite(values)
+    normalized = np.zeros_like(values, dtype=float)
+    if not np.any(finite):
+        return normalized
+    vmin = np.nanmin(values[finite])
+    vmax = np.nanmax(values[finite])
+    if vmax - vmin <= eps:
+        return normalized
+    normalized[finite] = (values[finite] - vmin) / (vmax - vmin)
+    return normalized
+
+
+def select_distinctive_attention_heads(
+    target_scores,
+    reference_scores=None,
+    salience_scores=None,
+    top_k=10,
+    normalize=True,
+    combine_method="product",
+    relative_weight=1.0,
+    salience_weight=1.0,
+    output_dir=None,
+    run_name="distinctive_head_selection",
+    plot_heatmaps=True,
+    cmap=THEME_CMAP,
+    close_after_save=True,
+):
+    """
+    Select heads that are both different from a reference and salient.
+
+    This function supports contrastive selection in the IzzyViz workflow:
+    after an overview reveals that two conditions or models differ, rank the
+    layer/head cells that are worth inspecting next.
+
+    The selection score combines two signals:
+
+    - relative difference: ``abs(target_scores - reference_scores)`` when a
+      reference is provided; otherwise ``target_scores`` itself.
+    - absolute salience: ``salience_scores`` when provided; otherwise
+      ``abs(target_scores)``.
+
+    By default, both signals are min-max normalized and multiplied:
+    ``combined = relative_diff_norm * salience_norm``. This avoids selecting
+    regions that changed a lot but are visually/quantitatively weak, and also
+    avoids selecting strong regions that are not distinctive.
+
+    Parameters
+    ----------
+    target_scores : array-like, shape (num_layers, num_heads)
+        Layer x head score matrix for the target condition/model.
+    reference_scores : array-like, optional
+        Layer x head score matrix for the reference condition/model. If None,
+        ``target_scores`` is treated as the relative signal.
+    salience_scores : array-like, optional
+        Layer x head absolute-importance matrix for the target. If None,
+        ``abs(target_scores)`` is used.
+    top_k : int
+        Number of heads to return.
+    normalize : bool
+        Whether to min-max normalize relative and salience signals before
+        combining them.
+    combine_method : {"product", "weighted_sum"}
+        How to combine normalized relative and salience signals.
+    relative_weight, salience_weight : float
+        Exponents for ``product`` or linear weights for ``weighted_sum``.
+    output_dir : str | Path | None
+        If provided, save heatmaps and a JSON summary.
+    run_name : str
+        Prefix used for saved files and figure titles.
+    plot_heatmaps : bool
+        Whether to draw relative, salience, and combined score heatmaps.
+    cmap : str | Colormap
+        Colormap used for heatmaps.
+    close_after_save : bool
+        Close saved figures to reduce memory use.
+
+    Returns
+    -------
+    dict
+        Contains score matrices, top indices/records, figures, axes, and output
+        paths.
+    """
+    target_scores = np.asarray(target_scores, dtype=float)
+    if target_scores.ndim != 2:
+        raise ValueError(
+            f"target_scores must be a 2D layer x head matrix, got {target_scores.shape}."
+        )
+
+    if reference_scores is None:
+        relative = np.asarray(target_scores, dtype=float)
+    else:
+        reference_scores = np.asarray(reference_scores, dtype=float)
+        if reference_scores.shape != target_scores.shape:
+            raise ValueError(
+                "reference_scores must have the same shape as target_scores: "
+                f"{reference_scores.shape} != {target_scores.shape}."
+            )
+        relative = np.abs(target_scores - reference_scores)
+
+    if salience_scores is None:
+        salience = np.abs(target_scores)
+    else:
+        salience = np.asarray(salience_scores, dtype=float)
+        if salience.shape != target_scores.shape:
+            raise ValueError(
+                "salience_scores must have the same shape as target_scores: "
+                f"{salience.shape} != {target_scores.shape}."
+            )
+
+    if normalize:
+        relative_for_score = _minmax_normalize_array(relative)
+        salience_for_score = _minmax_normalize_array(salience)
+    else:
+        relative_for_score = relative
+        salience_for_score = salience
+
+    combine_method = str(combine_method).lower()
+    if combine_method == "product":
+        combined = (
+            np.power(np.maximum(relative_for_score, 0.0), float(relative_weight))
+            * np.power(np.maximum(salience_for_score, 0.0), float(salience_weight))
+        )
+    elif combine_method == "weighted_sum":
+        combined = (
+            float(relative_weight) * relative_for_score
+            + float(salience_weight) * salience_for_score
+        )
+    else:
+        raise ValueError("combine_method must be 'product' or 'weighted_sum'.")
+
+    num_layers, num_heads = target_scores.shape
+    top_k = min(int(top_k), combined.size)
+    flat_order = np.argsort(combined.reshape(-1))[::-1][:top_k]
+    top_indices = np.dstack(np.unravel_index(flat_order, combined.shape))[0]
+    top_records = [
+        {
+            "rank": rank,
+            "layer": int(layer),
+            "head": int(head),
+            "combined_score": float(combined[layer, head]),
+            "relative_score": float(relative[layer, head]),
+            "relative_score_normalized": float(relative_for_score[layer, head]),
+            "salience_score": float(salience[layer, head]),
+            "salience_score_normalized": float(salience_for_score[layer, head]),
+        }
+        for rank, (layer, head) in enumerate(top_indices, start=1)
+    ]
+
+    output_paths = {}
+    figures = {}
+    axes_map = {}
+    output_dir = Path(output_dir) if output_dir is not None else None
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _plot_matrix(matrix, title, filename):
+        fig, ax = plt.subplots(figsize=(max(7, num_heads * 0.55), max(5, num_layers * 0.22)))
+        im = ax.imshow(matrix, aspect="auto", cmap=cmap)
+        ax.set_title(title)
+        ax.set_xlabel("Head")
+        ax.set_ylabel("Layer")
+        ax.set_xticks(np.arange(num_heads))
+        ax.set_yticks(np.arange(num_layers))
+        ax.tick_params(labelsize=7)
+        for record in top_records:
+            layer = record["layer"]
+            head = record["head"]
+            ax.scatter(
+                [head],
+                [layer],
+                s=90,
+                facecolors="none",
+                edgecolors=THEME_NEGATIVE,
+                linewidths=1.6,
+            )
+            ax.text(
+                head,
+                layer,
+                str(record["rank"]),
+                ha="center",
+                va="center",
+                color=THEME_NEGATIVE,
+                fontsize=7,
+                fontweight="bold",
+            )
+        fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
+        fig.tight_layout()
+        if output_dir is not None:
+            path = output_dir / filename
+            fig.savefig(path, dpi=180)
+            output_paths[filename.rsplit(".", 1)[0]] = str(path)
+            if close_after_save:
+                plt.close(fig)
+        else:
+            figures[filename.rsplit(".", 1)[0]] = fig
+            axes_map[filename.rsplit(".", 1)[0]] = ax
+
+    if plot_heatmaps:
+        _plot_matrix(
+            relative_for_score,
+            f"{run_name}: normalized relative difference",
+            "relative_difference_heatmap.png",
+        )
+        _plot_matrix(
+            salience_for_score,
+            f"{run_name}: normalized absolute salience",
+            "absolute_salience_heatmap.png",
+        )
+        _plot_matrix(
+            combined,
+            f"{run_name}: distinctive selection score",
+            "combined_distinctive_score_heatmap.png",
+        )
+
+    if output_dir is not None:
+        summary_path = output_dir / "distinctive_head_selection_summary.json"
+        summary = {
+            "run_name": run_name,
+            "top_k": int(top_k),
+            "normalize": bool(normalize),
+            "combine_method": combine_method,
+            "relative_weight": float(relative_weight),
+            "salience_weight": float(salience_weight),
+            "top_records": top_records,
+        }
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+        output_paths["summary"] = str(summary_path)
+
+    return {
+        "relative_scores": relative,
+        "salience_scores": salience,
+        "relative_scores_normalized": relative_for_score,
+        "salience_scores_normalized": salience_for_score,
+        "combined_scores": combined,
+        "top_indices": top_indices,
+        "top_records": top_records,
         "figures": figures,
         "axes": axes_map,
         "output_paths": output_paths,

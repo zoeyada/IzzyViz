@@ -6,6 +6,7 @@ from .visualization import (
     check_stability_heatmap_with_gradient_color,
     cluster_attention_heads,
     select_attention_heads_by_metric,
+    select_distinctive_attention_heads,
     visualize_attention_evolution_sparklines,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "check_stability_heatmap_with_gradient_color",
     "cluster_attention_heads",
     "select_attention_heads_by_metric",
+    "select_distinctive_attention_heads",
     "visualize_attention_evolution_sparklines",
 ]
