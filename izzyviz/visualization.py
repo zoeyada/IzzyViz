@@ -4349,6 +4349,7 @@ def cluster_attention_heads(
     overview_kwargs=None,
     overview_title=None,
     pca_title=None,
+    save_summary=True,
 ):
     """
     Cluster transformer attention heads by configurable attention metrics.
@@ -4664,39 +4665,40 @@ def cluster_attention_heads(
                 detail_paths.append(str(detail_path))
             output_paths["detail_heatmaps"] = detail_paths
 
-        summary = {
-            "run_name": run_name,
-            "n_clusters": int(n_clusters),
-            "metrics": list(metric_names),
-            "metric_params": metric_params,
-            "scale": scale,
-            "clustering_method": clustering_method,
-            "plot_overview": bool(plot_overview),
-            "plot_pca": bool(plot_pca),
-            "plot_detail_heatmaps": bool(plot_detail_heatmaps),
-            "overview_renderer": overview_renderer,
-            "overview_merge_virtual_tokens": bool(overview_merge_virtual_tokens),
-            "overview_top_n": int(overview_top_n),
-            "representatives": [
-                {
-                    "cluster": int(labels[idx]),
-                    "layer": int(head_infos[idx][0]),
-                    "head": int(head_infos[idx][1]),
-                }
-                for idx in representatives
-            ],
-            "cluster_sizes": {
-                str(cluster_id): int(np.sum(labels == cluster_id))
-                for cluster_id in range(n_clusters)
-            },
-            "ignore_first_n": int(ignore_first_n),
-            "plot_overview_no_merge": bool(plot_overview_no_merge),
-            "plot_overview_merge": bool(plot_overview_merge),
-        }
-        summary_path = output_dir / "run_summary.json"
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
-        output_paths["summary"] = str(summary_path)
+        if save_summary:
+            summary = {
+                "run_name": run_name,
+                "n_clusters": int(n_clusters),
+                "metrics": list(metric_names),
+                "metric_params": metric_params,
+                "scale": scale,
+                "clustering_method": clustering_method,
+                "plot_overview": bool(plot_overview),
+                "plot_pca": bool(plot_pca),
+                "plot_detail_heatmaps": bool(plot_detail_heatmaps),
+                "overview_renderer": overview_renderer,
+                "overview_merge_virtual_tokens": bool(overview_merge_virtual_tokens),
+                "overview_top_n": int(overview_top_n),
+                "representatives": [
+                    {
+                        "cluster": int(labels[idx]),
+                        "layer": int(head_infos[idx][0]),
+                        "head": int(head_infos[idx][1]),
+                    }
+                    for idx in representatives
+                ],
+                "cluster_sizes": {
+                    str(cluster_id): int(np.sum(labels == cluster_id))
+                    for cluster_id in range(n_clusters)
+                },
+                "ignore_first_n": int(ignore_first_n),
+                "plot_overview_no_merge": bool(plot_overview_no_merge),
+                "plot_overview_merge": bool(plot_overview_merge),
+            }
+            summary_path = output_dir / "run_summary.json"
+            with open(summary_path, "w", encoding="utf-8") as f:
+                json.dump(summary, f, indent=2)
+            output_paths["summary"] = str(summary_path)
 
     return {
         "features": features,
@@ -4738,6 +4740,7 @@ def select_attention_heads_by_metric(
     detail_file_format="pdf",
     detail_kwargs=None,
     close_after_save=True,
+    save_summary=True,
 ):
     """
     Rank attention heads by one metric and optionally plot selected views.
@@ -5120,7 +5123,7 @@ def select_attention_heads_by_metric(
         if detail_paths:
             output_paths["top_attention_maps"] = detail_paths
 
-    if output_dir is not None:
+    if output_dir is not None and save_summary:
         summary_path = output_dir / "metric_selection_summary.json"
         summary = {
             "run_name": run_name,
@@ -5184,6 +5187,7 @@ def select_distinctive_attention_heads(
     plot_heatmaps=True,
     cmap=THEME_CMAP,
     close_after_save=True,
+    save_summary=True,
 ):
     """
     Select heads that are both different from a reference and salient.
@@ -5372,7 +5376,7 @@ def select_distinctive_attention_heads(
             "combined_distinctive_score_heatmap.png",
         )
 
-    if output_dir is not None:
+    if output_dir is not None and save_summary:
         summary_path = output_dir / "distinctive_head_selection_summary.json"
         summary = {
             "run_name": run_name,
@@ -5507,6 +5511,7 @@ def select_distinctive_attention_heads_by_features(
     plot_heatmaps=True,
     cmap=THEME_CMAP,
     close_after_save=True,
+    save_summary=True,
 ):
     """
     Select distinctive heads by comparing raw per-head feature vectors.
@@ -5630,8 +5635,9 @@ def select_distinctive_attention_heads_by_features(
         plot_heatmaps=plot_heatmaps,
         cmap=cmap,
         close_after_save=close_after_save,
+        save_summary=save_summary,
     )
-    if output_dir is not None:
+    if output_dir is not None and save_summary:
         summary_path = Path(output_dir) / "feature_distinctive_head_selection_summary.json"
         summary = {
             "run_name": run_name,
