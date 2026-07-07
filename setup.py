@@ -8,7 +8,7 @@ setup(
     long_description_content_type='text/markdown',
     author='Luo Xizi',
     author_email='e0909010@u.nus.edu',
-    url='https://github.com/lxz333/IzzyViz',  
+    url='https://github.com/zoeyada/IzzyViz',  
     packages=find_packages(),
     install_requires=[
         'matplotlib>=3.0.0',
