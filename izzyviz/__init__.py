@@ -5,8 +5,10 @@ from .visualization import (
     compare_two_attentions_with_circles,
     check_stability_heatmap_with_gradient_color,
     cluster_attention_heads,
+    extract_attention_head_features,
     select_attention_heads_by_metric,
     select_distinctive_attention_heads,
+    select_distinctive_attention_heads_by_features,
     visualize_attention_evolution_sparklines,
 )
 
@@ -17,7 +19,9 @@ __all__ = [
     "compare_two_attentions_with_circles",
     "check_stability_heatmap_with_gradient_color",
     "cluster_attention_heads",
+    "extract_attention_head_features",
     "select_attention_heads_by_metric",
     "select_distinctive_attention_heads",
+    "select_distinctive_attention_heads_by_features",
     "visualize_attention_evolution_sparklines",
 ]

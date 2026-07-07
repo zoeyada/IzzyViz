@@ -5399,3 +5399,260 @@ def select_distinctive_attention_heads(
         "axes": axes_map,
         "output_paths": output_paths,
     }
+
+
+def extract_attention_head_features(
+    attentions,
+    query_slice=None,
+    key_slice=None,
+    metrics=DEFAULT_CLUSTER_METRICS,
+    metric_params=None,
+    ignore_first_n=0,
+    batch_index=0,
+):
+    """
+    Extract per-head feature vectors from raw attention tensors.
+
+    This is the tensor-level counterpart to the features used by
+    ``cluster_attention_heads``. Each head is represented by a vector of
+    interpretable attention metrics, such as entropy, variance, threshold mass,
+    low-range dependency, and long-range dependency.
+
+    Parameters
+    ----------
+    attentions : sequence | array | tensor
+        Attention tensors shaped ``[layers, heads, query, key]`` or a sequence
+        of layer tensors shaped ``[batch, heads, query, key]``.
+    query_slice, key_slice : slice | tuple | index array | None
+        Attention region used for feature extraction.
+    metrics : sequence[str | callable]
+        Built-in metrics or callables. Built-ins match ``cluster_attention_heads``.
+    metric_params : dict | None
+        Per-metric parameters.
+    ignore_first_n : int
+        Number of leading key columns inside ``key_slice`` to ignore for feature
+        computation only.
+    batch_index : int
+        Batch item used when layer tensors include a batch dimension.
+
+    Returns
+    -------
+    dict
+        ``features`` with shape ``[layers, heads, metrics]``,
+        ``feature_names``, ``head_infos``, and sliced ``submatrices``.
+    """
+    metric_params = metric_params or {}
+    attention_array = _attention_layers_heads_to_numpy(attentions, batch_index=batch_index)
+    if attention_array.ndim != 4:
+        raise ValueError(f"Expected attentions to resolve to 4D, got shape {attention_array.shape}.")
+
+    num_layers, num_heads, query_len, key_len = attention_array.shape
+    q_slice = _normalize_slice(query_slice, query_len)
+    k_slice = _normalize_slice(key_slice, key_len)
+    q_start = q_slice.start if isinstance(q_slice, slice) and q_slice.start is not None else 0
+    k_start = k_slice.start if isinstance(k_slice, slice) and k_slice.start is not None else 0
+    score_k_start = k_start + max(int(ignore_first_n), 0)
+
+    metric_names = []
+    metric_functions = []
+    for metric in metrics:
+        if callable(metric):
+            metric_names.append(getattr(metric, "__name__", "custom_metric"))
+            metric_functions.append(metric)
+        else:
+            if metric not in _CLUSTER_METRIC_REGISTRY:
+                raise ValueError(f"Unknown metric: {metric}")
+            metric_names.append(metric)
+            metric_functions.append(_CLUSTER_METRIC_REGISTRY[metric])
+
+    submatrices = attention_array[:, :, q_slice, k_slice].astype(float)
+    features = np.zeros((num_layers, num_heads, len(metric_functions)), dtype=float)
+    head_infos = []
+    for layer_idx in range(num_layers):
+        for head_idx in range(num_heads):
+            sub_display = submatrices[layer_idx, head_idx]
+            if ignore_first_n > 0:
+                sub_score = sub_display[:, int(ignore_first_n):]
+            else:
+                sub_score = sub_display
+            for metric_idx, (metric_name, metric_fn) in enumerate(zip(metric_names, metric_functions)):
+                params = dict(metric_params.get(metric_name, {}))
+                params.setdefault("query_start", q_start)
+                params.setdefault("key_start", score_k_start)
+                features[layer_idx, head_idx, metric_idx] = metric_fn(sub_score, **params)
+            head_infos.append((layer_idx, head_idx))
+
+    return {
+        "features": features,
+        "feature_names": list(metric_names),
+        "head_infos": head_infos,
+        "submatrices": submatrices,
+        "query_slice": q_slice,
+        "key_slice": k_slice,
+        "ignore_first_n": int(ignore_first_n),
+    }
+
+
+def select_distinctive_attention_heads_by_features(
+    target_features,
+    reference_features,
+    salience_features=None,
+    top_k=10,
+    feature_names=None,
+    scale="robust",
+    distance_metric="euclidean",
+    salience_method="norm",
+    output_dir=None,
+    run_name="feature_distinctive_head_selection",
+    plot_heatmaps=True,
+    cmap=THEME_CMAP,
+    close_after_save=True,
+):
+    """
+    Select distinctive heads by comparing raw per-head feature vectors.
+
+    This function compares the same ``(layer, head)`` across two conditions or
+    models. It is intended for cross-model, RAG-setting, or checkpoint
+    comparison when the prompt and analyzed attention region are aligned.
+
+    The relative signal is a vector distance between target and reference head
+    features. The salience signal is derived from the target head feature vector.
+    Final ranking delegates to ``select_distinctive_attention_heads`` using the
+    same difference x salience logic.
+
+    Parameters
+    ----------
+    target_features, reference_features : array-like
+        Feature tensors with shape ``[layers, heads, features]``.
+    salience_features : array-like | None
+        Optional feature tensor used for salience. Defaults to target features.
+    top_k : int
+        Number of heads to return.
+    feature_names : list[str] | None
+        Names of the feature dimensions, saved in the summary.
+    scale : {"robust", "standard", None, "none"}
+        Scaling applied jointly to target/reference feature vectors before
+        computing distances.
+    distance_metric : {"euclidean", "manhattan", "cosine"}
+        Distance between target and reference vectors for the same head.
+    salience_method : {"norm", "mean_abs", "max_abs"}
+        How to turn the target feature vector into an absolute salience score.
+    output_dir, run_name, plot_heatmaps, cmap, close_after_save
+        Passed to ``select_distinctive_attention_heads``.
+
+    Returns
+    -------
+    dict
+        Feature distances, salience scores, and the underlying selection result.
+    """
+    target_features = np.asarray(target_features, dtype=float)
+    reference_features = np.asarray(reference_features, dtype=float)
+    if target_features.shape != reference_features.shape:
+        raise ValueError(
+            "target_features and reference_features must have the same shape: "
+            f"{target_features.shape} != {reference_features.shape}."
+        )
+    if target_features.ndim != 3:
+        raise ValueError(
+            "target_features must have shape [layers, heads, features], "
+            f"got {target_features.shape}."
+        )
+
+    salience_features = target_features if salience_features is None else np.asarray(salience_features, dtype=float)
+    if salience_features.shape != target_features.shape:
+        raise ValueError(
+            "salience_features must have the same shape as target_features: "
+            f"{salience_features.shape} != {target_features.shape}."
+        )
+
+    num_layers, num_heads, num_features = target_features.shape
+    target_flat = target_features.reshape(-1, num_features)
+    reference_flat = reference_features.reshape(-1, num_features)
+    salience_flat = salience_features.reshape(-1, num_features)
+
+    scale = "none" if scale is None else str(scale).lower()
+    if scale in {"none", "false"}:
+        target_scaled = target_flat.copy()
+        reference_scaled = reference_flat.copy()
+        salience_scaled = salience_flat.copy()
+    else:
+        combined = np.vstack([target_flat, reference_flat, salience_flat])
+        if scale == "robust":
+            combined_scaled = _robust_scale_features(combined)
+        elif scale == "standard":
+            combined_scaled = _standard_scale_features(combined)
+        else:
+            raise ValueError("scale must be 'robust', 'standard', None, or 'none'.")
+        n = target_flat.shape[0]
+        target_scaled = combined_scaled[:n]
+        reference_scaled = combined_scaled[n : 2 * n]
+        salience_scaled = combined_scaled[2 * n :]
+
+    distance_metric = str(distance_metric).lower()
+    diff = target_scaled - reference_scaled
+    if distance_metric == "euclidean":
+        relative_flat = np.sqrt(np.sum(diff * diff, axis=1))
+    elif distance_metric == "manhattan":
+        relative_flat = np.sum(np.abs(diff), axis=1)
+    elif distance_metric == "cosine":
+        numerator = np.sum(target_scaled * reference_scaled, axis=1)
+        denom = (
+            np.linalg.norm(target_scaled, axis=1)
+            * np.linalg.norm(reference_scaled, axis=1)
+        )
+        cosine_similarity = np.divide(numerator, denom, out=np.zeros_like(numerator), where=denom > 1e-12)
+        relative_flat = 1.0 - cosine_similarity
+    else:
+        raise ValueError("distance_metric must be 'euclidean', 'manhattan', or 'cosine'.")
+
+    salience_method = str(salience_method).lower()
+    if salience_method == "norm":
+        salience_flat_scores = np.linalg.norm(salience_scaled, axis=1)
+    elif salience_method == "mean_abs":
+        salience_flat_scores = np.mean(np.abs(salience_scaled), axis=1)
+    elif salience_method == "max_abs":
+        salience_flat_scores = np.max(np.abs(salience_scaled), axis=1)
+    else:
+        raise ValueError("salience_method must be 'norm', 'mean_abs', or 'max_abs'.")
+
+    relative_scores = relative_flat.reshape(num_layers, num_heads)
+    salience_scores = salience_flat_scores.reshape(num_layers, num_heads)
+
+    selection = select_distinctive_attention_heads(
+        target_scores=relative_scores,
+        reference_scores=None,
+        salience_scores=salience_scores,
+        top_k=top_k,
+        normalize=True,
+        combine_method="product",
+        output_dir=output_dir,
+        run_name=run_name,
+        plot_heatmaps=plot_heatmaps,
+        cmap=cmap,
+        close_after_save=close_after_save,
+    )
+    if output_dir is not None:
+        summary_path = Path(output_dir) / "feature_distinctive_head_selection_summary.json"
+        summary = {
+            "run_name": run_name,
+            "feature_names": list(feature_names) if feature_names is not None else None,
+            "scale": scale,
+            "distance_metric": distance_metric,
+            "salience_method": salience_method,
+            "top_records": selection["top_records"],
+        }
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+        selection["output_paths"]["feature_summary"] = str(summary_path)
+
+    return {
+        "relative_scores": relative_scores,
+        "salience_scores": salience_scores,
+        "selection": selection,
+        "top_records": selection["top_records"],
+        "feature_names": list(feature_names) if feature_names is not None else None,
+        "scale": scale,
+        "distance_metric": distance_metric,
+        "salience_method": salience_method,
+        "output_paths": selection["output_paths"],
+    }
