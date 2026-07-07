@@ -16,6 +16,7 @@ setup(
         'torch>=1.0.0',
         'transformers>=4.0.0',
         'pandas>=1.4.0',
+        'scipy>=1.4.0',
         'pybind11>=2.12'  # Add pybind11 if compilation might be needed for compatibility
     ],
     classifiers=[
