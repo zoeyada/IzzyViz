@@ -5673,6 +5673,11 @@ def visualize_distinctive_attention_head_maps(
     output_dir=None,
     filename="distinctive_attention_head_maps.png",
     cmap=THEME_CMAP,
+    layout="auto",
+    ncols=2,
+    panel_width=5.4,
+    panel_height=7.2,
+    tick_every=2,
     close_after_save=True,
 ):
     """
@@ -5702,6 +5707,15 @@ def visualize_distinctive_attention_head_maps(
         Saved filename when ``output_dir`` is provided.
     cmap : str | Colormap
         Colormap. Defaults to the IzzyViz purple theme.
+    layout : {"auto", "grid", "vertical"}
+        Subplot layout. ``"grid"`` is more readable for many models because it
+        gives each Layer x Head map its own y-axis space.
+    ncols : int
+        Number of columns when using grid layout.
+    panel_width, panel_height : float
+        Size of each model panel in inches.
+    tick_every : int
+        Show every nth layer tick to avoid crowded y-axis labels.
     close_after_save : bool
         Close saved figures to reduce memory use.
 
@@ -5745,22 +5759,43 @@ def visualize_distinctive_attention_head_maps(
     if np.isclose(vmin, vmax):
         vmax = vmin + 1e-9
 
-    fig_height = max(2.4 * num_models, 4.0)
-    fig_width = max(0.55 * num_heads + 4.0, 9.0)
-    fig, axes = plt.subplots(num_models, 1, figsize=(fig_width, fig_height), squeeze=False)
+    layout = str(layout).lower()
+    if layout == "auto":
+        layout = "grid" if num_models > 3 else "vertical"
+    if layout == "grid":
+        ncols = max(1, int(ncols))
+        nrows = int(np.ceil(num_models / ncols))
+        fig, axes = plt.subplots(
+            nrows,
+            ncols,
+            figsize=(panel_width * ncols, panel_height * nrows),
+            squeeze=False,
+        )
+    elif layout == "vertical":
+        nrows, ncols = num_models, 1
+        fig, axes = plt.subplots(
+            nrows,
+            1,
+            figsize=(panel_width, panel_height * nrows),
+            squeeze=False,
+        )
+    else:
+        raise ValueError("layout must be 'auto', 'grid', or 'vertical'.")
+
     image = None
     for row_idx, (label, matrix) in enumerate(zip(model_order, matrices)):
-        ax = axes[row_idx, 0]
+        grid_row = row_idx // ncols
+        grid_col = row_idx % ncols
+        ax = axes[grid_row, grid_col]
         image = ax.imshow(matrix, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)
         ax.set_ylabel("Layer")
-        ax.set_title(label, loc="left", fontsize=11, fontweight="bold", color=THEME_NEGATIVE)
+        ax.set_title(label, loc="left", fontsize=10, fontweight="bold", color=THEME_NEGATIVE, pad=4)
         ax.set_xticks(np.arange(num_heads))
-        ax.set_yticks(np.arange(num_layers))
+        y_ticks = np.arange(0, num_layers, max(1, int(tick_every)))
+        ax.set_yticks(y_ticks)
+        ax.set_yticklabels([str(value) for value in y_ticks])
         ax.tick_params(axis="both", labelsize=7, length=2)
-        if row_idx == num_models - 1:
-            ax.set_xlabel("Head")
-        else:
-            ax.set_xticklabels([])
+        ax.set_xlabel("Head")
 
         for record in top_records_by_model[label]:
             layer = int(record["layer"])
@@ -5787,10 +5822,13 @@ def visualize_distinctive_attention_head_maps(
                 zorder=5,
             )
 
-    fig.suptitle(title, fontsize=16, fontweight="bold", color="black")
-    fig.subplots_adjust(left=0.08, right=0.89, top=0.93, bottom=0.08, hspace=0.34)
+    for empty_idx in range(num_models, nrows * ncols):
+        axes[empty_idx // ncols, empty_idx % ncols].axis("off")
+
+    fig.suptitle(title, fontsize=15, fontweight="bold", color="black", y=0.995)
+    fig.subplots_adjust(left=0.06, right=0.91, top=0.965, bottom=0.055, wspace=0.24, hspace=0.28)
     if image is not None:
-        cax = fig.add_axes([0.91, 0.12, 0.018, 0.76])
+        cax = fig.add_axes([0.93, 0.12, 0.018, 0.76])
         cbar = fig.colorbar(image, cax=cax)
         cbar.outline.set_visible(False)
         cbar.set_label(score_key.replace("_", " ").title(), rotation=90)
