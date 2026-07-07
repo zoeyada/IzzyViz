@@ -5656,3 +5656,277 @@ def select_distinctive_attention_heads_by_features(
         "salience_method": salience_method,
         "output_paths": selection["output_paths"],
     }
+
+
+def _get_distinctive_selection_result(result):
+    if isinstance(result, dict) and "selection" in result:
+        return result["selection"]
+    return result
+
+
+def visualize_distinctive_attention_head_maps(
+    comparison_results,
+    model_order=None,
+    score_key="combined_scores",
+    top_n=8,
+    title="Distinctive Attention Head Selection",
+    output_dir=None,
+    filename="distinctive_attention_head_maps.png",
+    cmap=THEME_CMAP,
+    close_after_save=True,
+):
+    """
+    Visualize distinctive head selection scores for multiple models/conditions.
+
+    This is a Select-stage visualization for cross-condition analysis. It takes
+    outputs from ``select_distinctive_attention_heads`` or
+    ``select_distinctive_attention_heads_by_features`` and draws one
+    Layer x Head map per model/condition using the IzzyViz purple theme.
+
+    Parameters
+    ----------
+    comparison_results : dict[str, dict]
+        Mapping from model/condition label to a distinctive selection result.
+    model_order : list[str] | None
+        Display order. Defaults to insertion order.
+    score_key : {"combined_scores", "relative_scores_normalized",
+        "salience_scores_normalized", "relative_scores", "salience_scores"}
+        Matrix to visualize from each selection result.
+    top_n : int
+        Number of top-ranked heads to mark in each map.
+    title : str
+        Figure title.
+    output_dir : str | Path | None
+        If provided, save the figure there.
+    filename : str
+        Saved filename when ``output_dir`` is provided.
+    cmap : str | Colormap
+        Colormap. Defaults to the IzzyViz purple theme.
+    close_after_save : bool
+        Close saved figures to reduce memory use.
+
+    Returns
+    -------
+    dict
+        Figure, axes, and optional output path.
+    """
+    if not comparison_results:
+        raise ValueError("comparison_results must not be empty.")
+
+    model_order = list(model_order or comparison_results.keys())
+    score_aliases = {
+        "relative_scores_normalized": "relative_scores_normalized",
+        "salience_scores_normalized": "salience_scores_normalized",
+        "relative_normalized": "relative_scores_normalized",
+        "salience_normalized": "salience_scores_normalized",
+    }
+    score_key = score_aliases.get(score_key, score_key)
+
+    matrices = []
+    top_records_by_model = {}
+    for label in model_order:
+        selection = _get_distinctive_selection_result(comparison_results[label])
+        if score_key not in selection:
+            raise ValueError(
+                f"score_key '{score_key}' is not available for {label}. "
+                f"Available keys include: {sorted(k for k in selection if k.endswith('scores') or k.endswith('normalized'))}"
+            )
+        matrices.append(np.asarray(selection[score_key], dtype=float))
+        top_records_by_model[label] = selection.get("top_records", [])[:top_n]
+
+    num_models = len(model_order)
+    num_layers, num_heads = matrices[0].shape
+    for matrix in matrices:
+        if matrix.shape != (num_layers, num_heads):
+            raise ValueError("All score matrices must have the same Layer x Head shape.")
+
+    vmin = min(np.nanmin(matrix) for matrix in matrices)
+    vmax = max(np.nanmax(matrix) for matrix in matrices)
+    if np.isclose(vmin, vmax):
+        vmax = vmin + 1e-9
+
+    fig_height = max(2.4 * num_models, 4.0)
+    fig_width = max(0.55 * num_heads + 4.0, 9.0)
+    fig, axes = plt.subplots(num_models, 1, figsize=(fig_width, fig_height), squeeze=False)
+    image = None
+    for row_idx, (label, matrix) in enumerate(zip(model_order, matrices)):
+        ax = axes[row_idx, 0]
+        image = ax.imshow(matrix, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)
+        ax.set_ylabel("Layer")
+        ax.set_title(label, loc="left", fontsize=11, fontweight="bold", color=THEME_NEGATIVE)
+        ax.set_xticks(np.arange(num_heads))
+        ax.set_yticks(np.arange(num_layers))
+        ax.tick_params(axis="both", labelsize=7, length=2)
+        if row_idx == num_models - 1:
+            ax.set_xlabel("Head")
+        else:
+            ax.set_xticklabels([])
+
+        for record in top_records_by_model[label]:
+            layer = int(record["layer"])
+            head = int(record["head"])
+            rank = int(record["rank"])
+            ax.scatter(
+                [head],
+                [layer],
+                s=115,
+                facecolors="none",
+                edgecolors=THEME_NEGATIVE,
+                linewidths=1.8,
+                zorder=4,
+            )
+            ax.text(
+                head,
+                layer,
+                str(rank),
+                ha="center",
+                va="center",
+                fontsize=7,
+                fontweight="bold",
+                color=THEME_NEGATIVE,
+                zorder=5,
+            )
+
+    fig.suptitle(title, fontsize=16, fontweight="bold", color="black")
+    fig.subplots_adjust(left=0.08, right=0.89, top=0.93, bottom=0.08, hspace=0.34)
+    if image is not None:
+        cax = fig.add_axes([0.91, 0.12, 0.018, 0.76])
+        cbar = fig.colorbar(image, cax=cax)
+        cbar.outline.set_visible(False)
+        cbar.set_label(score_key.replace("_", " ").title(), rotation=90)
+
+    output_path = None
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / filename
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        if close_after_save:
+            plt.close(fig)
+
+    return {"figure": fig, "axes": axes, "output_path": str(output_path) if output_path else None}
+
+
+def visualize_representative_head_candidates(
+    representatives_by_model,
+    distinctive_records_by_model=None,
+    model_order=None,
+    title="Representative Head Candidates",
+    output_dir=None,
+    filename="representative_head_candidates.png",
+    max_distinctive_rank=12,
+    close_after_save=True,
+):
+    """
+    Visualize clustering representatives and their overlap with distinctive heads.
+
+    Parameters
+    ----------
+    representatives_by_model : dict[str, list[dict]]
+        Mapping from model/condition label to representative records containing
+        ``layer`` and ``head``. Records may also include ``cluster``.
+    distinctive_records_by_model : dict[str, list[dict]] | None
+        Optional top distinctive records. Representatives that also appear in
+        the top distinctive set are highlighted with the IzzyViz accent color.
+    model_order : list[str] | None
+        Display order. Defaults to insertion order.
+    title : str
+        Figure title.
+    output_dir : str | Path | None
+        If provided, save the figure there.
+    filename : str
+        Saved filename when ``output_dir`` is provided.
+    max_distinctive_rank : int
+        Only top distinctive heads up to this rank are used for overlap.
+    close_after_save : bool
+        Close saved figures to reduce memory use.
+
+    Returns
+    -------
+    dict
+        Figure, axis, table rows, and optional output path.
+    """
+    if not representatives_by_model:
+        raise ValueError("representatives_by_model must not be empty.")
+
+    distinctive_records_by_model = distinctive_records_by_model or {}
+    model_order = list(model_order or representatives_by_model.keys())
+
+    rows = []
+    max_layer = 0
+    for label in model_order:
+        distinctive_set = {
+            (int(record["layer"]), int(record["head"]))
+            for record in distinctive_records_by_model.get(label, [])
+            if int(record.get("rank", max_distinctive_rank + 1)) <= max_distinctive_rank
+        }
+        for record in representatives_by_model.get(label, []):
+            layer = int(record["layer"])
+            head = int(record["head"])
+            max_layer = max(max_layer, layer)
+            rows.append(
+                {
+                    "model_label": label,
+                    "cluster": int(record.get("cluster", -1)),
+                    "layer": layer,
+                    "head": head,
+                    "also_top_distinctive": (layer, head) in distinctive_set,
+                }
+            )
+
+    fig, ax = plt.subplots(figsize=(max(9.0, 0.34 * (max_layer + 1) + 4.0), max(3.5, 0.62 * len(model_order) + 1.8)))
+    for model_idx, label in enumerate(model_order):
+        label_rows = [row for row in rows if row["model_label"] == label]
+        for row in label_rows:
+            color = THEME_NEGATIVE if row["also_top_distinctive"] else THEME_POSITIVE
+            marker = "*" if row["also_top_distinctive"] else "o"
+            size = 170 if row["also_top_distinctive"] else 95
+            ax.scatter(
+                row["layer"],
+                model_idx,
+                s=size,
+                c=color,
+                marker=marker,
+                alpha=0.9,
+                edgecolors="white",
+                linewidths=0.7,
+                zorder=3,
+            )
+            ax.text(
+                row["layer"],
+                model_idx + 0.11,
+                f"H{row['head']}",
+                fontsize=7,
+                ha="center",
+                va="bottom",
+                color="black",
+            )
+
+    ax.set_yticks(np.arange(len(model_order)), model_order)
+    ax.set_xlabel("Layer")
+    ax.set_title(title, fontsize=15, fontweight="bold")
+    ax.grid(axis="x", alpha=0.22, color=THEME_NEGATIVE)
+    ax.set_axisbelow(True)
+    ax.set_xlim(-0.8, max_layer + 0.8)
+    legend_handles = [
+        Line2D([0], [0], marker="o", color="none", markerfacecolor=THEME_POSITIVE, markeredgecolor="white", markersize=9, label="Cluster representative"),
+        Line2D([0], [0], marker="*", color="none", markerfacecolor=THEME_NEGATIVE, markeredgecolor="white", markersize=13, label="Representative and top distinctive"),
+    ]
+    ax.legend(handles=legend_handles, loc="upper right", frameon=False)
+    fig.tight_layout()
+
+    output_path = None
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / filename
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        if close_after_save:
+            plt.close(fig)
+
+    return {
+        "figure": fig,
+        "axis": ax,
+        "rows": rows,
+        "output_path": str(output_path) if output_path else None,
+    }

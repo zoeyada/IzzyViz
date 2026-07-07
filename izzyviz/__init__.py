@@ -10,6 +10,8 @@ from .visualization import (
     select_distinctive_attention_heads,
     select_distinctive_attention_heads_by_features,
     visualize_attention_evolution_sparklines,
+    visualize_distinctive_attention_head_maps,
+    visualize_representative_head_candidates,
 )
 
 __all__ = [
@@ -24,4 +26,6 @@ __all__ = [
     "select_distinctive_attention_heads",
     "select_distinctive_attention_heads_by_features",
     "visualize_attention_evolution_sparklines",
+    "visualize_distinctive_attention_head_maps",
+    "visualize_representative_head_candidates",
 ]
