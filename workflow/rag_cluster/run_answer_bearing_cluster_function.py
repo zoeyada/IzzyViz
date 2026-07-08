@@ -27,6 +27,13 @@ MAX_DETAIL_PLOTS = 5
 IGNORE_FIRST_N = 1
 FORCE_RERUN = os.environ.get("IZZYVIZ_FORCE_RERUN", "0") == "1"
 HF_LOCAL_FILES_ONLY = os.environ.get("IZZYVIZ_HF_LOCAL_FILES_ONLY", "0") == "1"
+CONTEXT_IDS = [
+    value.strip()
+    for value in os.environ.get("IZZYVIZ_CONTEXT_IDS", "").split(",")
+    if value.strip()
+]
+MAX_CONTEXTS = os.environ.get("IZZYVIZ_MAX_CONTEXTS")
+MAX_CONTEXTS = int(MAX_CONTEXTS) if MAX_CONTEXTS else None
 
 BASE_CONTEXT = (
     "The Rev. John J. Cavanaugh, C.S.C. served as president from 1946 to 1952. "
@@ -262,6 +269,15 @@ def main():
 
     counts = {"ran": 0, "skipped": 0, "error": 0}
     items = list(contexts.items())
+    if CONTEXT_IDS:
+        requested = set(CONTEXT_IDS)
+        items = [(ctx_id, ctx_item) for ctx_id, ctx_item in items if ctx_id in requested]
+        missing = sorted(requested - {ctx_id for ctx_id, _ in items})
+        if missing:
+            raise ValueError(f"Requested context ids not found: {missing}")
+    if MAX_CONTEXTS is not None:
+        items = items[:MAX_CONTEXTS]
+
     for index, (ctx_id, ctx_item) in enumerate(items, start=1):
         print("=" * 80, flush=True)
         print(f"[{index}/{len(items)}] {ctx_id}", flush=True)
@@ -284,6 +300,8 @@ def main():
         "output_root": str(OUTPUT_ROOT),
         "model_name": MODEL_NAME,
         "n_contexts": len(contexts),
+        "n_contexts_run": len(items),
+        "context_ids": [ctx_id for ctx_id, _ in items],
         "ignore_first_n": IGNORE_FIRST_N,
         "counts": counts,
     }
