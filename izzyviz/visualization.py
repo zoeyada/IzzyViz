@@ -904,6 +904,8 @@ def visualize_attention_overview_fast(
     x_labels=None,
     y_labels=None,
     dpi=180,
+    wspace=0.18,
+    hspace=0.22,
     close_after_save=False,
 ):
     """
@@ -970,6 +972,8 @@ def visualize_attention_overview_fast(
         Optional original token labels used when label modes include token text.
     dpi : int
         Save resolution when ``save_path`` is provided.
+    wspace, hspace : float
+        Horizontal and vertical spacing between overview thumbnails.
     close_after_save : bool
         If True, close the figure after saving.
 
@@ -1011,8 +1015,8 @@ def visualize_attention_overview_fast(
         figure=fig,
         width_ratios=[0.55] + [1.0] * num_heads + [0.18],
         height_ratios=[0.45] + [1.0] * num_layers,
-        wspace=0.08,
-        hspace=0.10,
+        wspace=wspace,
+        hspace=hspace,
     )
 
     ax = fig.add_subplot(gs[0, 0])
@@ -4186,6 +4190,7 @@ def _save_cluster_overview(
         ax.text(0.5, 0.5, f"L{layer}", ha="center", va="center", fontsize=7, fontweight="bold")
 
     representative_set = set(representatives)
+    representative_rank = {idx: rank for rank, idx in enumerate(representatives, start=1)}
     image = None
     for layer in range(rows):
         for head in range(cols):
@@ -4251,18 +4256,27 @@ def _save_cluster_overview(
                         )
                 ax.tick_params(axis="both", length=1, pad=1)
             if idx in representative_set:
+                for spine in ax.spines.values():
+                    spine.set_edgecolor(THEME_NEGATIVE)
+                    spine.set_linewidth(2.4)
                 ax.annotate(
-                    "*",
+                    f"REP {representative_rank[idx]}\nC{cluster_id} L{layer}H{head}",
                     xy=(1.0, 1.0),
                     xycoords="axes fraction",
                     xytext=(5, 5),
                     textcoords="offset points",
                     ha="left",
                     va="bottom",
-                    fontsize=12,
+                    fontsize=7,
                     fontweight="bold",
                     color="white",
-                    bbox=dict(facecolor="black", alpha=0.8, edgecolor="white", boxstyle="circle,pad=0.25"),
+                    bbox=dict(
+                        facecolor=THEME_NEGATIVE,
+                        alpha=0.95,
+                        edgecolor="white",
+                        linewidth=0.8,
+                        boxstyle="round,pad=0.25",
+                    ),
                     clip_on=False,
                     zorder=20,
                 )
