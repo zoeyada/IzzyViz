@@ -1,0 +1,164 @@
+[
+  {
+    "ctx_id": "ctx_ac_001",
+    "relatedness": "high",
+    "length": 96,
+    "sequence_length": 342,
+    "x_end": 334,
+    "answer_start": 336,
+    "answer_end": 342,
+    "metric_top3": [
+      {
+        "rank": 1,
+        "layer": 0,
+        "head": 10,
+        "score": 0.9999908238130792
+      },
+      {
+        "rank": 2,
+        "layer": 8,
+        "head": 3,
+        "score": 0.9995876678752407
+      },
+      {
+        "rank": 3,
+        "layer": 14,
+        "head": 3,
+        "score": 0.9992120179599455
+      }
+    ],
+    "cluster_representatives": [
+      {
+        "ctx_id": "ctx_ac_001",
+        "cluster": 0,
+        "layer": 22,
+        "head": 7,
+        "cluster_size": 31
+      },
+      {
+        "ctx_id": "ctx_ac_001",
+        "cluster": 1,
+        "layer": 11,
+        "head": 1,
+        "cluster_size": 23
+      },
+      {
+        "ctx_id": "ctx_ac_001",
+        "cluster": 2,
+        "layer": 9,
+        "head": 0,
+        "cluster_size": 282
+      }
+    ],
+    "inspect_layer": 22,
+    "inspect_head": 7
+  },
+  {
+    "ctx_id": "ctx_0039",
+    "relatedness": "medium",
+    "length": 1801,
+    "sequence_length": 2110,
+    "x_end": 2102,
+    "answer_start": 2104,
+    "answer_end": 2110,
+    "metric_top3": [
+      {
+        "rank": 1,
+        "layer": 0,
+        "head": 10,
+        "score": 0.9999908742733215
+      },
+      {
+        "rank": 2,
+        "layer": 8,
+        "head": 3,
+        "score": 0.9997858026516088
+      },
+      {
+        "rank": 3,
+        "layer": 19,
+        "head": 3,
+        "score": 0.9996160188137759
+      }
+    ],
+    "cluster_representatives": [
+      {
+        "ctx_id": "ctx_0039",
+        "cluster": 0,
+        "layer": 9,
+        "head": 5,
+        "cluster_size": 299
+      },
+      {
+        "ctx_id": "ctx_0039",
+        "cluster": 1,
+        "layer": 23,
+        "head": 8,
+        "cluster_size": 28
+      },
+      {
+        "ctx_id": "ctx_0039",
+        "cluster": 2,
+        "layer": 14,
+        "head": 4,
+        "cluster_size": 9
+      }
+    ],
+    "inspect_layer": 9,
+    "inspect_head": 5
+  },
+  {
+    "ctx_id": "ctx_0088",
+    "relatedness": "low",
+    "length": 2049,
+    "sequence_length": 2409,
+    "x_end": 2401,
+    "answer_start": 2403,
+    "answer_end": 2409,
+    "metric_top3": [
+      {
+        "rank": 1,
+        "layer": 0,
+        "head": 10,
+        "score": 0.9999909041406044
+      },
+      {
+        "rank": 2,
+        "layer": 8,
+        "head": 3,
+        "score": 0.9993282743567713
+      },
+      {
+        "rank": 3,
+        "layer": 19,
+        "head": 5,
+        "score": 0.9993250052941096
+      }
+    ],
+    "cluster_representatives": [
+      {
+        "ctx_id": "ctx_0088",
+        "cluster": 0,
+        "layer": 16,
+        "head": 4,
+        "cluster_size": 31
+      },
+      {
+        "ctx_id": "ctx_0088",
+        "cluster": 1,
+        "layer": 15,
+        "head": 11,
+        "cluster_size": 32
+      },
+      {
+        "ctx_id": "ctx_0088",
+        "cluster": 2,
+        "layer": 9,
+        "head": 5,
+        "cluster_size": 273
+      }
+    ],
+    "inspect_layer": 16,
+    "inspect_head": 4
+  }
+]

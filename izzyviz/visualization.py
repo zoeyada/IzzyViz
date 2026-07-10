@@ -4363,6 +4363,10 @@ def cluster_attention_heads(
     overview_kwargs=None,
     overview_title=None,
     pca_title=None,
+    output_prefix=None,
+    overview_file_format="png",
+    pca_file_format="png",
+    detail_file_format="pdf",
     save_summary=True,
 ):
     """
@@ -4448,6 +4452,10 @@ def cluster_attention_heads(
     metric_params = metric_params or {}
     detail_kwargs = dict(detail_kwargs or {})
     overview_kwargs = dict(overview_kwargs or {})
+    output_prefix = "" if output_prefix is None else str(output_prefix)
+    overview_file_format = str(overview_file_format).lstrip(".")
+    pca_file_format = str(pca_file_format).lstrip(".")
+    detail_file_format = str(detail_file_format).lstrip(".")
     overview_renderer = overview_renderer.lower()
     if overview_renderer not in {"fast", "izzyviz"}:
         raise ValueError("overview_renderer must be 'fast' or 'izzyviz'.")
@@ -4554,7 +4562,7 @@ def cluster_attention_heads(
         output_dir.mkdir(parents=True, exist_ok=True)
 
         if plot_pca:
-            pca_path = output_dir / "pca_scatter.png"
+            pca_path = output_dir / f"{output_prefix}pca_scatter.{pca_file_format}"
             _save_cluster_pca(
                 pca_path,
                 features_scaled,
@@ -4570,8 +4578,7 @@ def cluster_attention_heads(
             overview_title_value = overview_title or f"{run_name} overview"
             if overview_renderer == "fast":
                 if plot_overview_no_merge:
-                    overview_no_merge_path = output_dir / "overview_no_merge.png"
-                    overview_compat_path = output_dir / "overview.png"
+                    overview_no_merge_path = output_dir / f"{output_prefix}overview_no_merge.{overview_file_format}"
                     _save_cluster_overview(
                         overview_no_merge_path,
                         submatrices,
@@ -4603,12 +4610,11 @@ def cluster_attention_heads(
                         wspace=overview_kwargs.get("wspace", 0.08),
                         hspace=overview_kwargs.get("hspace", 0.12),
                     )
-                    overview_compat_path.write_bytes(overview_no_merge_path.read_bytes())
                     output_paths["overview_no_merge"] = str(overview_no_merge_path)
-                    output_paths["overview"] = str(overview_compat_path)
+                    output_paths["overview"] = str(overview_no_merge_path)
 
                 if plot_overview_merge:
-                    overview_merge_path = output_dir / "overview_merge_tokens.png"
+                    overview_merge_path = output_dir / f"{output_prefix}overview_merge_tokens.{overview_file_format}"
                     _save_cluster_overview(
                         overview_merge_path,
                         submatrices,
@@ -4642,7 +4648,7 @@ def cluster_attention_heads(
                     )
                     output_paths["overview_merge"] = str(overview_merge_path)
             else:
-                overview_path = output_dir / "overview.png"
+                overview_path = output_dir / f"{output_prefix}overview.{overview_file_format}"
                 overview_array = np.asarray(submatrices, dtype=float)
                 fig, axes = visualize_attention_overview(
                     overview_array,
@@ -4662,7 +4668,9 @@ def cluster_attention_heads(
             for idx in representatives:
                 layer_idx, head_idx = head_infos[idx]
                 cluster_id = int(labels[idx])
-                detail_path = output_dir / f"cluster_{cluster_id}_L{layer_idx}_H{head_idx}.pdf"
+                detail_path = output_dir / (
+                    f"{output_prefix}cluster_{cluster_id}_L{layer_idx}_H{head_idx}.{detail_file_format}"
+                )
                 visualize_attention_matrix(
                     submatrices[layer_idx][head_idx],
                     x_labels=x_labels,
@@ -4709,7 +4717,7 @@ def cluster_attention_heads(
                 "plot_overview_no_merge": bool(plot_overview_no_merge),
                 "plot_overview_merge": bool(plot_overview_merge),
             }
-            summary_path = output_dir / "run_summary.json"
+            summary_path = output_dir / f"{output_prefix}run_summary.json"
             with open(summary_path, "w", encoding="utf-8") as f:
                 json.dump(summary, f, indent=2)
             output_paths["summary"] = str(summary_path)
@@ -5132,8 +5140,9 @@ def select_attention_heads_by_metric(
             if save_path is not None:
                 detail_paths.append(str(save_path))
             else:
-                figures[f"rank_{rank:02d}_attention"] = fig_ax.figure
-                axes_map[f"rank_{rank:02d}_attention"] = fig_ax
+                detail_ax = fig_ax[0] if isinstance(fig_ax, tuple) else fig_ax
+                figures[f"rank_{rank:02d}_attention"] = detail_ax.figure
+                axes_map[f"rank_{rank:02d}_attention"] = detail_ax
         if detail_paths:
             output_paths["top_attention_maps"] = detail_paths
 
