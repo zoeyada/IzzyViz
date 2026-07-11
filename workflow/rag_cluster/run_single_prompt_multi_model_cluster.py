@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from izzyviz import cluster_attention_heads
+from izzyviz import cluster_attention_heads, visualize_attention_overview_fast
 
 
 PROJECT_DIR = Path("/home/cuizhouying/IzzyViz")
@@ -97,6 +97,34 @@ def run_model(model_label, model_id):
             output_attentions=True,
             return_dict=True,
             use_cache=False,
+        )
+
+    x_labels = tokens[:question_end]
+    y_labels = tokens[answer_start:]
+
+    overview_merge_png_path = output_dir / "overview_merge_tokens.png"
+    overview_merge_svg_path = output_dir / "overview_merge_tokens.svg"
+    for overview_path in [overview_merge_png_path, overview_merge_svg_path]:
+        visualize_attention_overview_fast(
+            outputs.attentions,
+            query_slice=(answer_start, None),
+            key_slice=(0, question_end),
+            title=f"{model_label}: answer -> context/question attention (merged virtual tokens)",
+            save_path=overview_path,
+            shared_color_scale=True,
+            shared_cbar=True,
+            shared_cbar_label="Attention Score",
+            merge_virtual_tokens=True,
+            overview_top_n=3,
+            show_merge_token_labels=True,
+            merge_token_label_mode="index",
+            merge_token_important_label_mode="index",
+            merge_token_label_fontsize=3,
+            x_labels=x_labels,
+            y_labels=y_labels,
+            wspace=0.24,
+            hspace=0.26,
+            close_after_save=True,
         )
 
     result = cluster_attention_heads(
