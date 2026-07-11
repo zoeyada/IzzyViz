@@ -134,7 +134,7 @@ def run_model(model_label, model_id):
             "show_merge_token_labels": True,
             "merge_token_labels_representatives_only": False,
             "merge_token_label_mode": "index",
-            "merge_token_important_label_mode": "index_token",
+            "merge_token_important_label_mode": "index",
             "merge_token_label_fontsize": 3,
             "merge_token_highlight_color": "#f8bbd0",
             "merge_token_highlight_edgecolor": "#F06292",
